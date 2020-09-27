@@ -1,52 +1,125 @@
-from binance.client import Client
 from security import get_keys
+from time import sleep
+from binanceSimple import sellAmount, buyAmount
+
+from binance.client import Client
+from binance.exceptions import BinanceAPIException, BinanceOrderException
+from binance.websockets import BinanceSocketManager
+from twisted.internet import reactor
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
 
 x = get_keys('client')
 client = Client(x['api_key'], x['api_secret'])
 
-# for x in client.get_symbol_ticker():
-#     if 'USD' in x['symbol']:
-#         print(x['symbol'])
+# init
+price = {'BTCUSDT': pd.DataFrame(columns=['date', 'price']), 'error':False}
+maxsell = 0
+maxbuy = 0
 
-# exchangeRateBTCUSDT = client.get_symbol_ticker(symbol="BTCUSDT")['price']
-# exchangeRateBTCUSDT = float(exchangeRateBTCUSDT)
+loading_disp = True
 
-# for x in client.get_account()['balances']:
-#     assetPrice = float(x['free'])
-#     if assetPrice != 0.0:
-#         symbol = x['asset'] + 'BTC'
-#         exchangeRate = client.get_symbol_ticker(symbol=symbol)['price']
-#         exchangeRate = float(exchangeRate)
-#         print (x['asset'], assetPrice*exchangeRate*exchangeRateBTCUSDT*50.0, 'PHP')
+def btc_pairs_trade(msg):		
+	# define how to process incoming WebSocket messages
+	if msg['e'] != 'error':
+		dateStamp = pd.Timestamp.now()
+		price['BTCUSDT'].loc[len(price['BTCUSDT'])] = [dateStamp, float(msg['c'])]
+		print(dateStamp)
+	else:
+		price['error']:True
 
-import time
-from binance.websockets import BinanceSocketManager # Import the Binance Socket Manager
-from twisted.internet import reactor
+# init and start the WebSocket
+bsm = BinanceSocketManager(client)
+conn_key = bsm.start_symbol_ticker_socket('BTCUSDT', btc_pairs_trade)
+bsm.start()
 
+## main
+while len(price['BTCUSDT']) == 0:
+	# wait for WebSocket to start streaming data
+	sleep(0.1)
 
-# Instantiate a BinanceSocketManager, passing in the client that you instantiated
-bm = BinanceSocketManager(client)
+print('Gathering initial data...')	
+sleep(60.0*float(10))
+print('Done gathering initial data.')	
+loading_disp = False
 
-# This is our callback function. For now, it just prints messages as they come.
-def handle_message(msg):
-    print('start delay')
-    time.sleep(4)
-    print('end delay')
-    # print(msg)
+while True:
 
-# Start trade socket with 'ETHBTC' and use handle_message to.. handle the message.
-conn_key = bm.start_trade_socket('ETHBTC', handle_message)
-# then start the socket manager
-bm.start()
+	try:
+		maxsell=sellAmount('BTC')
+		maxbuy=buyAmount('USDT', 'BTCUSDT')
+	except:
+		pass
 
-# let some data flow..
-# time.sleep(10)
-print('start')
-time.sleep(20)
+	# error check to make sure WebSocket is working
+	if price['error']:
+		# stop and restart socket
+		bsm.stop_socket(conn_key)
+		bsm.start()
+		price['error'] = False
+	else:
+		# df = price['BTCUSDT']
+		# start_time = df.date.iloc[-1] - pd.Timedelta(minutes=1)
+		# df = df.loc[df.date >= start_time]
+		# max_price = df.price.max()
+		# min_price = df.price.min()
+		df = price['BTCUSDT']
 
-print('end')
+		start_time = df.date.iloc[-1] - pd.Timedelta(minutes=9)
+		df_a = df.loc[df.date >= start_time]
+		y = np.array(df_a.price)
+		x = np.array(df_a.date).reshape(-1, 1)
+		slope9 = LinearRegression().fit(x, y).coef_
 
+		
+		start_time = df.date.iloc[-1] - pd.Timedelta(minutes=6)
+		df_a = df.loc[df.date >= start_time]
+		y = np.array(df_a.price)
+		x = np.array(df_a.date).reshape(-1, 1)
+		slope6 = LinearRegression().fit(x, y).coef_
 
-# stop the socket manager
-bm.stop_socket(conn_key)
-reactor.stop()
+		
+		start_time = df.date.iloc[-1] - pd.Timedelta(minutes=3)
+		df_a = df.loc[df.date >= start_time]
+		y = np.array(df_a.price)
+		x = np.array(df_a.date).reshape(-1, 1)
+		slope3 = LinearRegression().fit(x, y).coef_
+
+		print(slope9, slope6, slope3)
+
+		# y = np.array(disp['Close'].astype(float))
+		# # x = np.array(disp['Close time'].astype(float)).reshape((-1, 1))
+		# x = np.linspace(0.0, float(min_num) - 1.0, num = min_num).reshape((-1, 1))
+		# slope = LinearRegression().fit(x, y).coef_
+
+		# percentage_change = 0.02
+		
+		# if df.price.iloc[-1] < max_price * (1.0 - percentage_change):
+		# 	print('current price < max_price *', 1.0 - percentage_change)
+		# 	try:
+		# 		order = client.create_test_order(symbol='BTCUSDT', side='SELL', type='MARKET', quantity = maxsell)
+		# 		print('Sell BTC:', maxsell)
+		# 		print('Asset:', maxsell + maxbuy)
+		# 		break
+		# 	except BinanceAPIException as e:
+		# 		# error handling goes here
+		# 		print(e)
+		# 	except BinanceOrderException as e:
+		# 		# error handling goes here
+		# 		print(e)
+
+		# elif df.price.iloc[-1] > min_price * (1.0 + percentage_change):
+		# 	print('current price > min_price *', 1.0 + percentage_change)
+		# 	try:
+		# 		order = client.create_test_order(symbol='BTCUSDT', side='BUY', type='MARKET', quantity=maxbuy)
+		# 		print('Buy BTC:', maxbuy)
+		# 		print('Asset:', maxsell + maxbuy)
+		# 		break
+		# 	except BinanceAPIException as e:
+		# 		# error handling goes here
+		# 		print(e)
+		# 	except BinanceOrderException as e:
+		# 		# error handling goes here
+		# 		print(e)
+	sleep(0.1)
