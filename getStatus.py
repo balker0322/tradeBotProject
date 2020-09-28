@@ -53,5 +53,9 @@ bsm = BinanceSocketManager(client)
 conn_key = bsm.start_symbol_ticker_socket(pairs, btc_pairs_trade)
 bsm.start()
 
-while(True):
-	pass
+while(True):	
+	if price['error']:
+		# stop and restart socket
+		bsm.stop_socket(conn_key)
+		bsm.start()
+		price['error'] = False
