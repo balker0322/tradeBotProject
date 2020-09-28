@@ -1,40 +1,57 @@
-from binance.client import Client
 from security import get_keys
+from time import sleep
+# from binanceSimple import sellAmount, buyAmount
+
+from binance.client import Client
+from binance.exceptions import BinanceAPIException, BinanceOrderException
+from binance.websockets import BinanceSocketManager
+from twisted.internet import reactor
+import pandas as pd
+import numpy as np
+# from sklearn.linear_model import LinearRegression
+
+pairs = 'BTCUSDT'
 
 x = get_keys('client')
 client = Client(x['api_key'], x['api_secret'])
 
-def totalAssetBTC():
-    totalBTC = 0.0
-    for x in client.get_account()['balances']:
-        baseCoin = 'BTC'
-        freeBalance = float(x['free'])
-        if freeBalance != 0.0:
-            symbol = x['asset']
-            exchangeSymbol = symbol + baseCoin
-            exchangeRate = float(client.get_symbol_ticker(symbol=exchangeSymbol)['price'])
-            totalBTC = totalBTC + exchangeRate*freeBalance
-    
-    return totalBTC
+price = {'BTCUSDT': pd.DataFrame(columns=[ 	'e', # Event type
+							   				'E', # Event time
+							   				's', # Symbol
+							   				'p', # Price change
+							   				'P', # Price change percent
+							   				'w', # Weighted average price
+							   				'x', # Previous day's close price
+							   				'c', # Current day's close price
+							   				'Q', # Close trade's quantity
+							   				'b', # Best bid price
+							   				'B', # Bid bid quantity
+							   				'a', # Best ask price
+							   				'A', # Best ask quantity
+							   				'o', # Open price
+							   				'h', # High price
+							   				'l', # Low price
+							   				'v', # Total traded base asset volume
+							   				'q', # Total traded quote asset volume
+							   				'O', # Statistics open time
+							   				'C', # Statistics close time
+							   				'F', # First trade ID
+							   				'L', # Last trade Id
+							   				'n', # Total number of trades
+										]), 'error':False}
 
-if __name__ == "__main__":
-    old = totalAssetBTC() * float(client.get_symbol_ticker(symbol="BTCUSDT")['price'])
-    new = 0.0
-    while(True):
-        new = totalAssetBTC() * float(client.get_symbol_ticker(symbol="BTCUSDT")['price'])
-        displayText = str(round(new,4)) + ' USDT '
+def btc_pairs_trade(msg):		
+	# define how to process incoming WebSocket messages
+	if msg['e'] != 'error':
+		log = pd.DataFrame({x:[msg[x]] for x in msg})
+		log.to_csv(pairs+'.csv', header = False, mode = 'a')
+	else:
+		price['error']:True
 
-        percentChange = (new / old) - 1.0
-        percentChange *= 100
+# init and start the WebSocket
+bsm = BinanceSocketManager(client)
+conn_key = bsm.start_symbol_ticker_socket(pairs, btc_pairs_trade)
+bsm.start()
 
-        if percentChange > 0.0:
-            displayText += '  UP +'
-        else:
-            displayText += 'DOWN '
-            
-        
-        displayText += str(round(percentChange,4)) + ' %'
-
-        print(displayText)
-
-        old = new
+while(True):
+	pass
