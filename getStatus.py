@@ -44,7 +44,7 @@ def btc_pairs_trade(msg):
 	# define how to process incoming WebSocket messages
 	if msg['e'] != 'error':
 		log = pd.DataFrame({x:[msg[x]] for x in msg})
-		log.to_csv(pairs+'.csv', header = False, mode = 'a')
+		log.to_csv(pairs+'.csv')#, header = False, mode = 'a') 
 	else:
 		price['error']:True
 

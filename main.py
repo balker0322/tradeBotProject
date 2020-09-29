@@ -23,13 +23,23 @@ price = {'BTCUSDT': csvdata, 'error':False}
 
 # price = {'BTCUSDT': pd.DataFrame(columns=['date', 'price']), 'error':False}
 
+def get_total_asset(coin_list, base_coin):
+    total_asset = 0.0
+    for coin_symbol in coin_list:
+        pair = coin_symbol + base_coin
+        if coin_symbol == base_coin:
+            total_asset += float(client.get_asset_balance(coin_symbol,recvWindow=10000)['free'])
+            continue
+        total_asset += float(client.get_asset_balance(coin_symbol,recvWindow=10000)['free']) * float(client.get_symbol_ticker(symbol=pair)['price'])
+    return total_asset
+
 def btc_pairs_trade(msg):		
 	# define how to process incoming WebSocket messages
 	if msg['e'] != 'error':
 		log = pd.DataFrame({x:[msg[x]] for x in msg})
 		log.to_csv(pairs+'.csv', header = False, mode = 'a')
-		dateStamp = pd.Timestamp.now()
-		price['BTCUSDT'].loc[len(price['BTCUSDT'])] = [dateStamp, float(msg['c'])]
+		# dateStamp = pd.Timestamp.now()
+		# price['BTCUSDT'].loc[len(price['BTCUSDT'])] = [dateStamp, float(msg['c'])]
 	else:
 		price['error']:True
 
@@ -55,6 +65,9 @@ bsm = BinanceSocketManager(client)
 conn_key = bsm.start_symbol_ticker_socket(pairs, btc_pairs_trade)
 bsm.start()
 
+initial_asset = get_total_asset(['BTC', 'USDT'], 'USDT')
+current_asset = 1.0
+
 # for i in range(15):
 # 	print(15 - i, 'minutes remaining...')
 # 	sleep(60)
@@ -67,11 +80,21 @@ while True:
 
 	metric = 0.0
 
-	# try:
-	# 	maxsell = sellAmount('BTC')
-	# 	maxbuy = buyAmount('USDT', 'BTCUSDT')
-	# except:
-	# 	pass
+	try:
+		current_asset = (get_total_asset(['BTC', 'USDT'], 'USDT')/initial_asset)
+	except:
+		pass
+
+	try:
+		csvdata = pd.read_csv("BTCUSDT.csv", header=None, usecols=[2,8])
+		csvdata = csvdata.rename(columns={2: "date", 8: "price"})
+		csvdata.date = pd.to_datetime(csvdata.date, unit='ms')
+		start_time = csvdata.date.iloc[-1] - pd.Timedelta(seconds=1000)
+		csvdata = csvdata.loc[csvdata.date >= start_time]
+		price['BTCUSDT'] = csvdata
+	except:
+		pass
+
 
 	# error check to make sure WebSocket is working
 	if price['error']:
@@ -90,7 +113,9 @@ while True:
 			metric = 0.0
 			continue
 		
-		print('MA(30) / MA(900):', round(metric, 4), '%')
+
+		print(round(metric, 4), current_asset - 1.0)
+
 
 		if metric > 0.1:
 			try:
