@@ -1,267 +1,124 @@
 from security import get_keys
 from time import sleep
-# from binanceSimple import sellAmount, buyAmount
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceOrderException
 from binance.websockets import BinanceSocketManager
 from twisted.internet import reactor
 import pandas as pd
 import numpy as np
-# from sklearn.linear_model import LinearRegression
+import os
 
-pairs = 'BTCUSDT'
-
-x = get_keys('client')
-client = Client(x['api_key'], x['api_secret'])
-
-
-csvdata = pd.read_csv("BTCUSDT.csv", header=None, usecols=[2,8])
-csvdata = csvdata.rename(columns={2: "date", 8: "price"})
-csvdata.date = pd.to_datetime(csvdata.date, unit='ms')
-
-price = {'BTCUSDT': csvdata, 'error':False}
-
-# price = {'BTCUSDT': pd.DataFrame(columns=['date', 'price']), 'error':False}
-
-def get_total_asset(coin_list, base_coin):
-    total_asset = 0.0
-    for coin_symbol in coin_list:
-        pair = coin_symbol + base_coin
-        if coin_symbol == base_coin:
-            total_asset += float(client.get_asset_balance(coin_symbol,recvWindow=10000)['free'])
-            continue
-        total_asset += float(client.get_asset_balance(coin_symbol,recvWindow=10000)['free']) * float(client.get_symbol_ticker(symbol=pair)['price'])
-    return total_asset
+keys = get_keys('client')
+client = Client(keys['api_key'], keys['api_secret'])
+trade_coin = 'BTC'
+stable_coin = 'USDT'
+pairs = trade_coin + stable_coin
+binance_socket_error = False
+trading_quantity = 0.00433
+initial_asset = 0.0
 
 def btc_pairs_trade(msg):		
-	# define how to process incoming WebSocket messages
 	if msg['e'] != 'error':
 		log = pd.DataFrame({x:[msg[x]] for x in msg})
-		log.to_csv(pairs+'.csv', header = False, mode = 'a')
-		# dateStamp = pd.Timestamp.now()
-		# price['BTCUSDT'].loc[len(price['BTCUSDT'])] = [dateStamp, float(msg['c'])]
+		mode = 'w'
+		if os.path.exists(pairs+'.csv'):
+			mode = 'a'
+		log.to_csv(pairs+'.csv', header = False, mode = mode)
 	else:
-		price['error']:True
+		binance_socket_error = True
 
-def buyAmount(coin, pair):
-	balanceBuy = float(client.get_asset_balance(coin,recvWindow=10000)['free'])
-	close = float(client.get_symbol_ticker(symbol=pair)['price'])
-	maxBuy = round(balanceBuy / close * .995, 5)
-	return maxBuy
-	
-def sellAmount(coin):
-	balanceSell = float(client.get_asset_balance(coin,recvWindow=10000)['free'])
-	maxSell = round(balanceSell * .995, 5)
-	return maxSell
+def get_status(seconds):
+	df = pd.read_csv(pairs+'.csv', header=None, usecols=[2,8])
+	df = df.rename(columns={2: "date", 8: "price"})
+	df.date = pd.to_datetime(df.date, unit='ms')
+	start_time = df.date.iloc[-1] - pd.Timedelta(seconds=seconds)
+	return df.loc[df.date >= start_time]
 
-def MA(sec):
-	df = price['BTCUSDT']
-	start_time = df.date.iloc[-1] - pd.Timedelta(seconds=sec)
-	df = df.loc[df.date >= start_time]
+def get_action(status):
+	average = [5, 10, 20]
+	try:	
+		ma = [MA(seconds=seconds*60, status=status) for seconds in average]
+	except:
+		return 0
+	if ma[0] > ma[1] and ma[1] > ma[2]: # buy
+		return 1
+	if ma[0] < ma[1] and ma[1] < ma[2]: # sell
+		return 2
+	return 0
+
+def MA(seconds, status):
+	start_time = status.date.iloc[-1] - pd.Timedelta(seconds=seconds)
+	df = status.loc[status.date >= start_time]
 	return df.price.mean()
 
-# init and start the WebSocket
+def buy_coin():
+	client.create_order(symbol=pairs, side='BUY', type='MARKET', quantity=trading_quantity)
+
+def sell_coin():
+	client.create_order(symbol=pairs, side='SELL', type='MARKET', quantity=trading_quantity)
+
+def get_total_asset(coin_list, base_coin):
+	total_asset = 0.0
+	for coin_symbol in coin_list:
+		pair = coin_symbol + base_coin
+		if coin_symbol == base_coin:
+			total_asset += float(client.get_asset_balance(coin_symbol,recvWindow=10000)['free'])
+			continue
+		total_asset += float(client.get_asset_balance(coin_symbol,recvWindow=10000)['free']) * float(client.get_symbol_ticker(symbol=pair)['price'])
+	return total_asset
+
+def display_result(initial_asset, action_display):
+	try:
+		current_asset = get_total_asset(coin_list = ['BTC', 'BNB', 'USDT'], base_coin = 'USDT')
+		gain = (current_asset/initial_asset) - 1.0
+		gain *= 100.0
+		display =  ("-" if gain < 0 else "+") + "{0:.4f} % ".format(abs(gain)) + action_display
+		print(display)
+	except:
+		pass
+
 bsm = BinanceSocketManager(client)
 conn_key = bsm.start_symbol_ticker_socket(pairs, btc_pairs_trade)
 bsm.start()
 
-initial_asset = get_total_asset(['BTC', 'USDT'], 'USDT')
-current_asset = 1.0
+while True:
+	try:
+		initial_asset = get_total_asset(coin_list = ['BTC', 'BNB', 'USDT'], base_coin = 'USDT')
+		break
+	except:
+		pass
 
-# for i in range(15):
-# 	print(15 - i, 'minutes remaining...')
-# 	sleep(60)
-
-# print('last 10 seconds...')
-# sleep(10)
-# sleep(40)
+action_display = ''
 
 while True:
-
-	metric = 0.0
-
-	try:
-		current_asset = (get_total_asset(['BTC', 'USDT'], 'USDT')/initial_asset)
-	except:
-		pass
-
-	try:
-		csvdata = pd.read_csv("BTCUSDT.csv", header=None, usecols=[2,8])
-		csvdata = csvdata.rename(columns={2: "date", 8: "price"})
-		csvdata.date = pd.to_datetime(csvdata.date, unit='ms')
-		start_time = csvdata.date.iloc[-1] - pd.Timedelta(seconds=1000)
-		csvdata = csvdata.loc[csvdata.date >= start_time]
-		price['BTCUSDT'] = csvdata
-	except:
-		pass
-
-
-	# error check to make sure WebSocket is working
-	if price['error']:
-		print("price['error']")
-		# stop and restart socket
+	
+	display_result(initial_asset = initial_asset, action_display = action_display)
+	action_display = ''
+	
+	if binance_socket_error:
 		bsm.stop_socket(conn_key)
 		bsm.start()
-		price['error'] = False
+		binance_socket_error = False
 	else:
 		try:
-			metric = (MA(30) / MA(900)) - 1.0
-			# metric = (MA(5) / MA(30)) - 1.0
-			metric*=100
+			status = get_status(seconds = 21*60) # get status of previous n seconds
+			action = get_action(status = status)
 		except:
-			print('MA error')
-			metric = 0.0
+			print('error in get status / action')
 			continue
-		
 
-		print(round(metric, 4), current_asset - 1.0)
-
-
-		if metric > 0.1:
+		if action == 1:
 			try:
-				print('BUY')
-				client.create_order(symbol='BTCUSDT', side='BUY', type='MARKET', quantity=0.00433)
+				action_display = 'BUY'
+				buy_coin()
 			except:
-				pass
-			continue
-		elif metric < -0.1:
+				continue
+
+		elif action == 2:
 			try:
-				print('SELL')
-				client.create_order(symbol='BTCUSDT', side='SELL', type='MARKET', quantity=0.00433)
+				action_display = 'SELL'
+				sell_coin()
 			except:
-				pass
-			continue
+				continue
+	
 	sleep(0.1)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# from security import get_keys
-# from time import sleep
-# from binanceSimple import sellAmount, buyAmount
-
-# from binance.client import Client
-# from binance.exceptions import BinanceAPIException, BinanceOrderException
-# from binance.websockets import BinanceSocketManager
-# from twisted.internet import reactor
-# import pandas as pd
-# import numpy as np
-# from sklearn.linear_model import LinearRegression
-
-# x = get_keys('client')
-# client = Client(x['api_key'], x['api_secret'])
-
-# # init
-# price = {'BTCUSDT': pd.DataFrame(columns=['date', 'price']), 'error':False}
-# maxsell = 0
-# maxbuy = 0
-
-# loading_disp = True
-
-# def MA(sec):
-#     data = pd.read_csv("BTCUSDT.csv", header=None, usecols=[2,8])
-#     start_time = pd.to_datetime(data[2], unit='ms').iloc[-1] - pd.Timedelta(seconds=sec)
-#     data[2] = pd.to_datetime(data[2], unit='ms')
-#     x = data.loc[data[2] >= start_time]
-#     x = x[8].mean()
-#     return x
-
-# def btc_pairs_trade(msg):		
-# 	# define how to process incoming WebSocket messages
-# 	if msg['e'] != 'error':
-# 		dateStamp = pd.Timestamp.now()
-# 		price['BTCUSDT'].loc[len(price['BTCUSDT'])] = [dateStamp, float(msg['c'])]
-# 		print(dateStamp)
-# 	else:
-# 		price['error']:True
-
-# # init and start the WebSocket
-# bsm = BinanceSocketManager(client)
-# conn_key = bsm.start_symbol_ticker_socket('BTCUSDT', btc_pairs_trade)
-# bsm.start()
-
-# ## main
-# while len(price['BTCUSDT']) == 0:
-# 	# wait for WebSocket to start streaming data
-# 	sleep(0.1)
-
-# print('Gathering initial data...')	
-# sleep(60.0*float(10))
-# print('Done gathering initial data.')	
-# loading_disp = False
-
-# while True:
-
-# 	try:
-# 		maxsell=sellAmount('BTC')
-# 		maxbuy=buyAmount('USDT', 'BTCUSDT')
-# 	except:
-# 		pass
-
-# 	# error check to make sure WebSocket is working
-# 	if price['error']:
-# 		# stop and restart socket
-# 		bsm.stop_socket(conn_key)
-# 		bsm.start()
-# 		price['error'] = False
-# 	else:
-# 		# df = price['BTCUSDT']
-# 		# start_time = df.date.iloc[-1] - pd.Timedelta(minutes=1)
-# 		# df = df.loc[df.date >= start_time]
-# 		# max_price = df.price.max()
-# 		# min_price = df.price.min()
-# 		df = price['BTCUSDT']
-
-# 		# y = np.array(disp['Close'].astype(float))
-# 		# # x = np.array(disp['Close time'].astype(float)).reshape((-1, 1))
-# 		# x = np.linspace(0.0, float(min_num) - 1.0, num = min_num).reshape((-1, 1))
-# 		# slope = LinearRegression().fit(x, y).coef_
-
-# 		# percentage_change = 0.02
-		
-# 		# if df.price.iloc[-1] < max_price * (1.0 - percentage_change):
-# 		# 	print('current price < max_price *', 1.0 - percentage_change)
-# 		# 	try:
-# 		# 		order = client.create_test_order(symbol='BTCUSDT', side='SELL', type='MARKET', quantity = maxsell)
-# 		# 		print('Sell BTC:', maxsell)
-# 		# 		print('Asset:', maxsell + maxbuy)
-# 		# 		break
-# 		# 	except BinanceAPIException as e:
-# 		# 		# error handling goes here
-# 		# 		print(e)
-# 		# 	except BinanceOrderException as e:
-# 		# 		# error handling goes here
-# 		# 		print(e)
-
-# 		# elif df.price.iloc[-1] > min_price * (1.0 + percentage_change):
-# 		# 	print('current price > min_price *', 1.0 + percentage_change)
-# 		# 	try:
-# 		# 		order = client.create_test_order(symbol='BTCUSDT', side='BUY', type='MARKET', quantity=maxbuy)
-# 		# 		print('Buy BTC:', maxbuy)
-# 		# 		print('Asset:', maxsell + maxbuy)
-# 		# 		break
-# 		# 	except BinanceAPIException as e:
-# 		# 		# error handling goes here
-# 		# 		print(e)
-# 		# 	except BinanceOrderException as e:
-# 		# 		# error handling goes here
-# 		# 		print(e)
-# 	sleep(0.1)
