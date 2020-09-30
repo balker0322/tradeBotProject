@@ -38,6 +38,7 @@ def get_action(status):
 	average = [5, 10, 20]
 	try:	
 		ma = [MA(seconds=seconds*60, status=status) for seconds in average]
+		print(["{0:.2f}".format(x) for x in ma])
 	except:
 		return 0
 	if ma[0] > ma[1] and ma[1] > ma[2]: # buy
@@ -88,11 +89,18 @@ while True:
 	except:
 		pass
 
+# sleep(21*60)
+
 action_display = ''
+loop_count = 0
+next_action = 'BUY'
 
 while True:
 	
-	display_result(initial_asset = initial_asset, action_display = action_display)
+	if loop_count == 0:
+		display_result(initial_asset = initial_asset, action_display = action_display)
+		loop_count = 10*60*5
+	loop_count -= 1
 	action_display = ''
 	
 	if binance_socket_error:
@@ -107,18 +115,28 @@ while True:
 			print('error in get status / action')
 			continue
 
-		if action == 1:
+		if action == 1 and next_action == 'BUY':
 			try:
-				action_display = 'BUY'
+				action_display = ''
+				print('trying to buy ...')
 				buy_coin()
+				print('done buy')
+				display_result(initial_asset = initial_asset, action_display = action_display)
+				next_action = 'SELL'
 			except:
+				next_action = 'BUY'
 				continue
 
-		elif action == 2:
+		elif action == 2 and next_action == 'SELL':
 			try:
-				action_display = 'SELL'
+				action_display = ''
+				print('trying to sell ...')
 				sell_coin()
+				print('done sell')
+				display_result(initial_asset = initial_asset, action_display = action_display)
+				next_action = 'BUY'
 			except:
+				next_action = 'SELL'
 				continue
 	
 	sleep(0.1)
